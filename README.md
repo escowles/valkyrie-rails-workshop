@@ -178,3 +178,161 @@ Run-run your controller spec test...
     bundle exec rspec spec/controllers/books_controller_spec.rb
 
 And now you should be down to only one failure!
+
+### Part 5: Creating Resources with the Controller
+
+The next controller test to fix is the `create` action. Currently, you should
+see an error like:
+
+    NoMethodError: undefined method 'count' for Book:Class
+
+Let's go ahead and provide this method to our book model. It will come in
+handy later. In order do this, we can use one of the provided Valkyrie queries
+to find all the resources of a given model. In `app/models/book.rb` add the
+following method:
+
+    def self.count
+      Valkyrie.config.metadata_adapter.query_service.find_all_of_model(model: self).count
+    end
+
+Re-running the controller tests shows that the test is now running successfully
+because we've added the missing method, but the test itself is still pending.
+
+Let's get the test running by adding some parameters to the create request.
+In the `post` request under the "Post #create" test, replace the `valid_attributes`
+variable with the hash `{ title: ['My Work'] }`
+
+Run `bundle exec rspec spec/controllers/books_controller_spec.rb` and you
+should see the new error `undefined method 'save'`
+
+We will need to update our books controller to create a new book using
+our change set. Create a new book change set, then validate the parameters
+from the form and sync those changes to the change set. Then we can use our
+persister to save the new resource. The resulting method should look something
+like:
+
+    def create
+      change_set = BookChangeSet.new(Book.new)
+      change_set.validate(book_params)
+      change_set.sync
+      @book = Valkyrie.config.metadata_adapter.persister.save(resource: change_set.resource)
+
+      respond_to do |format|
+        if @book.persisted?
+          format.html { redirect_to @book, notice: 'Book was successfully created.' }
+          format.json { render :show, status: :created, location: @book }
+        else
+          format.html { render :new }
+          format.json { render json: @book.errors, status: :unprocessable_entity }
+        end
+      end
+    end
+
+Re-run your specs to verify the tests pass.
+
+### Part 6: Enabling the Remaining Actions in the Controller
+
+#### GET #show
+
+To enable the `show` action, update the test to create a new book resource
+and then perform the GET request. To do this, we can use the same persister
+code we used in the previous controller test to create a resource for the
+show request; however, we can omit the change set and pass attributes to the
+model directly. The test should look like:
+
+    describe "GET #show" do
+      it "returns a success response" do
+        book = Valkyrie.config.metadata_adapter.persister.save(resource: Book.new(title: ["My Book"]))
+        get :show, params: {id: book.to_param}, session: valid_session
+        expect(response).to be_successful
+      end
+    end
+
+Running the spec test will show the error `undefined method 'find' for Book:Class`
+so we'll need to update our controller to use one of Valkyrie's query methods
+to retrieve the given resource. All we need to do here is update the `set_book`
+method as follows:
+
+    def set_book
+      @book = Valkyrie.config.metadata_adapter.query_service.find_by(id: Valkyrie::ID.new(params[:id]))
+    end
+
+Run your spec tests to see if that fixes it.
+
+We could also do a quick refactor at this point. `Valkyrie.config.metadata_adapter`
+is used twice in the controller. We can memoize this and DRY up our code a little
+bit. Create a new private method:
+
+    def metadata_adapter
+      @metadata_adapter ||= Valkyrie.config.metadata_adapter
+    end
+
+Now we can change the other two calls to `Valkyrie.config.metadata_adapter`
+to simply `metadata_adapter`.
+
+#### GET #edit
+
+Next, let's get the edit action working on our controller. Use the same
+method for creating a book that we used previously:
+
+    describe "GET #edit" do
+      it "returns a success response" do
+        book = Valkyrie.config.metadata_adapter.persister.save(resource: Book.new(title: ["My Book"]))
+        get :edit, params: {id: book.to_param}, session: valid_session
+        expect(response).to be_successful
+      end
+    end
+
+We will now get the error: ` undefined method 'errors'`. Looking at the controller,
+the `set_book` action is performed prior to the edit request, and is currently
+returning a Book object. If remember from the previous part, a Valkyrie::Resource
+has no `errors` method, but a change set does. We could change `set_book` to
+return a change set instead:
+
+    def set_book
+      @book = BookChangeSet.new(metadata_adapter.query_service.find_by(id: Valkyrie::ID.new(params[:id])))
+    end
+
+Re-run your spec tests. The edit test should pass now. Are any other tests
+failing because of this change? Why or why not?
+
+#### PUT #update
+
+There are a couple of update tests in the controller, but let's just pick
+one to start with. Edit the test code to create a new resource and then
+make a request with updated attributes:
+
+    it "updates the requested book" do
+      book = Valkyrie.config.metadata_adapter.persister.save(resource: Book.new(title: ["My Book"]))
+      put :update, params: {id: book.to_param, book: { title: ["My Updated Book"]}}, session: valid_session
+      updated_book = Valkyrie.config.metadata_adapter.query_service.find_by(id: book.id)
+      expect(updated_book.title).to eq(["My Updated Book"])
+    end
+
+Because our `set_book` action returns a change set, we can simply validate the
+new params on our change set directly and then update the resource.
+
+N.B. this may not be the best way to implement this because `@book` is getting
+reset. An alternative implementation might be to keep the book and its change set
+more separate.
+
+    def update
+      respond_to do |format|
+        if @book.validate(book_params)
+          @book.sync
+          @book = metadata_adapter.persister.save(resource: @book.resource)
+          format.html { redirect_to @book, notice: 'Book was successfully updated.' }
+          format.json { render :show, status: :ok, location: @book }
+        else
+          format.html { render :edit }
+          format.json { render json: @book.errors, status: :unprocessable_entity }
+        end
+      end
+    end
+
+You will also need to update the `book_params` method to account for multivalued
+fields in the request:
+
+    def book_params
+      params.require(:book).permit(title: [], author: [], description: [])
+    end
