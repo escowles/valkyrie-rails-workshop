@@ -27,13 +27,15 @@ any Unix-type OS.
 Clone this repo to your system in a directory of your choice, then start off
 with an empty Rails application using the provided template.
 
-    cd valkyrie-rails
+    cd valkyrie-rails-workshop
     rails new library-repo -m template.rb -T -d postgresql
 
 ### Part 1: Install and Configure Valkyrie
 
 From this point forward, all your changes will be made in the newly created
 `library-repo` application.
+
+    cd library-repo
 
 Add the valkyrie gem to your Gemfile and install.
 
@@ -336,3 +338,102 @@ fields in the request:
     def book_params
       params.require(:book).permit(title: [], author: [], description: [])
     end
+
+#### GET #index
+
+To get the index test working, we need to update the test to create a
+book. To do that, we can copy the same code we used from previous tests
+to create a new book. The updated test should look like:
+
+    describe "GET #index" do
+      it "returns a success response" do
+        Valkyrie.config.metadata_adapter.persister.save(resource: Book.new(title: ["New Book"]))
+        get :index, params: {}, session: valid_session
+        expect(response).to be_successful
+      end
+    end
+
+After running the spec test, your should see an error like:
+`undefined method 'all'`. We can add the `all` method to the `Book`
+model and do a little refactoring with the existing `count` method.
+After refactoring and adding the `all` method, it should look like this:
+
+    def self.all
+      Valkyrie.config.metadata_adapter.query_service.find_all_of_model(model: self)
+    end
+
+    def self.count
+      all.count
+    end
+
+Re-run the spec tests and everything should pass.
+
+#### DELETE #destroy
+
+The last remaining action in the controller is the delete method. To
+fix this, we can update the test to create a resource to be deleted.
+Recycling our previous method yields an updated test:
+
+
+    it "destroys the requested book" do
+      book = Valkyrie.config.metadata_adapter.persister.save(resource: Book.new(title: ["Book to delete"]))
+      expect {
+        delete :destroy, params: {id: book.to_param}, session: valid_session
+      }.to change(Book, :count).by(-1)
+    end
+
+Running the test will produce an error with `undefined method
+'destroy'`. We can update the controller method to use the Valkyrie
+persister to delete the resource.
+
+    def destroy
+      metadata_adapter.persister.delete(resource: @book)
+      respond_to do |format|
+        format.html { redirect_to books_url, notice: 'Book was successfully destroyed.' }
+        format.json { head :no_content }
+      end
+    end
+
+Note that `@book` is really a change set, but the persister is only
+looking for the resource's id, so either a Valkyrie resource or a change
+set should work here.
+
+### Part 7: Testing Out the User Interface
+
+At this point, all the controller actions should work and we should be
+able to open a server session and create, edit, and delete books in the
+user interface.
+
+    http://localhost:3000/books
+
+Using the app, we can perform all the actions, bit you'll notice that
+none of the attributes are being saved to the resource. You can create a
+new book, but you can't save the title, author, or description.
+
+If you look in the logs coming from the server output you should see:
+
+    Unpermitted parameters: :title, :author, :description
+
+While we have updated our controller to allow for multiple fields, the
+params hash coming from the form is still sending singular values.
+To fix this, we need to add `multiple: true` to each of the form fields
+that were auto-generated in `app/views/works/_form.html.erb`. To do
+that, update each input like so:
+
+    <div class="field">
+      <%= form.label :title %>
+      <%= form.text_field :title, multiple: true %>
+    </div>
+
+    <div class="field">
+      <%= form.label :author %>
+      <%= form.text_field :author, multiple: true %>
+    </div>
+
+    <div class="field">
+      <%= form.label :description %>
+      <%= form.text_area :description, multiple: true %>
+    </div>
+
+Now we should be able to enter values for all our attributes and have
+them persist, as well as update and delete each book resource.
