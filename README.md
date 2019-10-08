@@ -37,9 +37,12 @@ From this point forward, all your changes will be made in the newly created
 
     cd library-repo
 
-Add the valkyrie gem to your Gemfile and install.
+Add the valkyrie gem to your Gemfile
 
     gem 'valkyrie'
+
+Install the new gem by running
+
     bundle install
 
 Valkyrie needs to run some database migrations to prepare your application.
@@ -50,8 +53,8 @@ Install and run the provided migrations.
 
 Lastly, we need to configure Valkyrie's storage and metadata persisters.
 
-* copy [valkyrie.rb](examples/valkyrie.rb) to `config/initializers/valkyrie.rb`
-* copy [valkyrie.yml](examples/valkyrie.yml) to `config/valkyrie.yml`
+    cp ../examples/valkyrie.rb config/initializers
+    cp ../examples/valkyrie.yml config
 
 ### Part 2: Create the Book Model and Test
 
@@ -66,13 +69,11 @@ a Valkyrie::Types::Set. By default, all attributes in Valkyrie resources are
 arrays.
 
 We can also create a spec test for our new model that uses shared specs from
-the Valkyrie gem. Copy the included spec test to your spec folder.
+the Valkyrie gem. Copy the included spec test to your spec folder and
+run the tests.
 
     mkdir spec/models
-
-Copy [book_spec.rb](examples/book_spec.rb) to the above directory. Then,
-run the test suite.
-
+    cp ../examples/book_spec.rb spec/models
     bundle exec rspec
 
 You should see about 20 examples run. These are only the included specs from
@@ -157,8 +158,8 @@ as the model and have additional validation specifications as well.
 For now, we will create the simplest change set possible, and use shared specs
 from the Valkyrie gem to test it.
 
-* copy [book_change_set.rb](examples/book_change_set.rb) to `app/change_sets/book_change_set.rb`
-* copy [book_change_set_spec.rb](examples/book_change_set_spec.rb) to `spec/change_sets/book_change_set_spec.rb`
+    cp ../examples/book_change_set.rb app/change_sets 
+    cp ../examples/book_change_set_spec.rb spec/change_sets 
 
 Let's run the change set's spec tests to make sure everything is working as
 expected:
@@ -201,11 +202,77 @@ Re-running the controller tests shows that the test is now running successfully
 because we've added the missing method, but the test itself is still pending.
 
 Let's get the test running by adding some parameters to the create request.
-In the `post` request under the "Post #create" test, replace the `valid_attributes`
-variable with the hash `{ title: ['My Work'] }`
+The scaffold has provided a `let` statement for valid attributes. We can
+use that in order to get the tests to execute. Replace the `let` with:
 
-Run `bundle exec rspec spec/controllers/books_controller_spec.rb` and you
-should see the new error `undefined method 'save'`
+    let(:valid_attributes) {
+      { title: ["My Book"] }
+    }
+
+Now, when we re-run our spec tests, we should see about 12 failures.
+This is because the tests are now getting run instead of skipped.
+Looking at the first failure, we should see `undefined method 'create!'
+for Book:Class`. Valkyrie doesn't have a `create` method, so we can
+implement one in the test. Typically, you would use FactoryBot to do
+this, but we'll just create our own method.
+
+Towards the top of the controller spec test, preferably after the `let`
+statements, add the following method:
+
+    def create_book(attributes)
+      Valkyrie.config.metadata_adapter.persister.save(resource: Book.new(attributes))
+    end
+
+This method will server as our `Book.create!` process. Now we can
+replace every instance of it with a call to our method. Wherever you see
+`book = Book.create! valid_attributes`, replace it with `book =
+create_book valid_attributes`.
+
+Re-run your controller test with
+
+    bundle exec rspec spec/controllers/books_controller_spec.rb
+
+There should be about 8 failures, with the top-most error being
+`undefined method 'all'`. This is another ActiveRecord-based method that
+returns all the instances of our model. Similar to the `count` method
+above, we can refactor our Book model to include both the `all` and
+`count` methods. The result will look like:
+
+    def self.all
+      Valkyrie.config.metadata_adapter.query_service.find_all_of_model(model: self).to_a
+    end
+
+    def self.count
+      all.count
+    end
+
+Note the `to_a` in our new `all` method. The query service returns
+enumerator objects, but we want these to be arrays, to we call the
+`to_a` method to convert them. The `count` method then uses this.
+
+Running the spec test will show the error `undefined method 'find' for Book:Class`
+so we'll need to update our controller to use one of Valkyrie's query methods
+to retrieve the given resource. All we need to do here is update the `set_book`
+method as follows:
+
+    def set_book
+      @book = Valkyrie.config.metadata_adapter.query_service.find_by(id: Valkyrie::ID.new(params[:id]))
+    end
+
+Re-run the specs and we will now get the error: ` undefined method 'errors'`. Looking at the controller,
+the `set_book` action is performed prior to the edit request, and is currently
+returning a Book object. If remember from the previous part, a Valkyrie::Resource
+has no `errors` method, but a change set does. We could change `set_book` to
+return a change set instead:
+
+    def set_book
+      @book = BookChangeSet.new(Valkyrie.config.metadata_adapter.query_service.find_by(id: Valkyrie::ID.new(params[:id])))
+    end
+
+Re-run your spec tests. The edit test should pass now. Are any other tests
+failing because of this change? Why or why not?
+
+Now, you should see the new error `undefined method 'save'`
 
 We will need to update our books controller to create a new book using
 our change set. Create a new book change set, then validate the parameters
@@ -230,36 +297,15 @@ like:
       end
     end
 
-Re-run your specs to verify the tests pass.
+Re-run your specs to verify the tests pass and you'll see another new
+error about the `last` method. We can add that to our model as well:
 
-### Part 6: Enabling the Remaining Actions in the Controller
-
-#### GET #show
-
-To enable the `show` action, update the test to create a new book resource
-and then perform the GET request. To do this, we can use the same persister
-code we used in the previous controller test to create a resource for the
-show request; however, we can omit the change set and pass attributes to the
-model directly. The test should look like:
-
-    describe "GET #show" do
-      it "returns a success response" do
-        book = Valkyrie.config.metadata_adapter.persister.save(resource: Book.new(title: ["My Book"]))
-        get :show, params: {id: book.to_param}, session: valid_session
-        expect(response).to be_successful
-      end
+    def self.last
+      all.last
     end
 
-Running the spec test will show the error `undefined method 'find' for Book:Class`
-so we'll need to update our controller to use one of Valkyrie's query methods
-to retrieve the given resource. All we need to do here is update the `set_book`
-method as follows:
-
-    def set_book
-      @book = Valkyrie.config.metadata_adapter.query_service.find_by(id: Valkyrie::ID.new(params[:id]))
-    end
-
-Run your spec tests to see if that fixes it.
+At this point there should be about 3 failures in our controller. We'll
+finish those up in the next section.
 
 We could also do a quick refactor at this point. `Valkyrie.config.metadata_adapter`
 is used twice in the controller. We can memoize this and DRY up our code a little
@@ -272,44 +318,18 @@ bit. Create a new private method:
 Now we can change the other two calls to `Valkyrie.config.metadata_adapter`
 to simply `metadata_adapter`.
 
-#### GET #edit
+Rerun your tests to verify there are no additional failures and continue
+to the next part.
 
-Next, let's get the edit action working on our controller. Use the same
-method for creating a book that we used previously:
-
-    describe "GET #edit" do
-      it "returns a success response" do
-        book = Valkyrie.config.metadata_adapter.persister.save(resource: Book.new(title: ["My Book"]))
-        get :edit, params: {id: book.to_param}, session: valid_session
-        expect(response).to be_successful
-      end
-    end
-
-We will now get the error: ` undefined method 'errors'`. Looking at the controller,
-the `set_book` action is performed prior to the edit request, and is currently
-returning a Book object. If remember from the previous part, a Valkyrie::Resource
-has no `errors` method, but a change set does. We could change `set_book` to
-return a change set instead:
-
-    def set_book
-      @book = BookChangeSet.new(metadata_adapter.query_service.find_by(id: Valkyrie::ID.new(params[:id])))
-    end
-
-Re-run your spec tests. The edit test should pass now. Are any other tests
-failing because of this change? Why or why not?
+### Part 6: Enabling the Remaining Actions in the Controller
 
 #### PUT #update
 
-There are a couple of update tests in the controller, but let's just pick
-one to start with. Edit the test code to create a new resource and then
-make a request with updated attributes:
+Add some attributes to update the resource:
 
-    it "updates the requested book" do
-      book = Valkyrie.config.metadata_adapter.persister.save(resource: Book.new(title: ["My Book"]))
-      put :update, params: {id: book.to_param, book: { title: ["My Updated Book"]}}, session: valid_session
-      updated_book = Valkyrie.config.metadata_adapter.query_service.find_by(id: book.id)
-      expect(updated_book.title).to eq(["My Updated Book"])
-    end
+    let(:new_attributes) {
+      { title: ["My Updated Book"] }
+    }
 
 Because our `set_book` action returns a change set, we can simply validate the
 new params on our change set directly and then update the resource.
@@ -332,6 +352,15 @@ more separate.
       end
     end
 
+To fix the `undefined method 'reload'` error, replace the lines in the
+test with:
+
+    updated_book = Valkyrie.config.metadata_adapter.query_service.find_by(id: book.id)
+    expect(updated_book.title).to eq(["My Updated Book"])
+
+This will reload the book from the database and verify that the title
+was updated.
+
 You will also need to update the `book_params` method to account for multivalued
 fields in the request:
 
@@ -339,48 +368,9 @@ fields in the request:
       params.require(:book).permit(title: [], author: [], description: [])
     end
 
-#### GET #index
-
-To get the index test working, we need to update the test to create a
-book. To do that, we can copy the same code we used from previous tests
-to create a new book. The updated test should look like:
-
-    describe "GET #index" do
-      it "returns a success response" do
-        Valkyrie.config.metadata_adapter.persister.save(resource: Book.new(title: ["New Book"]))
-        get :index, params: {}, session: valid_session
-        expect(response).to be_successful
-      end
-    end
-
-After running the spec test, your should see an error like:
-`undefined method 'all'`. We can add the `all` method to the `Book`
-model and do a little refactoring with the existing `count` method.
-After refactoring and adding the `all` method, it should look like this:
-
-    def self.all
-      Valkyrie.config.metadata_adapter.query_service.find_all_of_model(model: self)
-    end
-
-    def self.count
-      all.count
-    end
-
-Re-run the spec tests and everything should pass.
-
 #### DELETE #destroy
 
-The last remaining action in the controller is the delete method. To
-fix this, we can update the test to create a resource to be deleted.
-Recycling our previous method yields an updated test:
-
-
-    it "destroys the requested book" do
-      book = Valkyrie.config.metadata_adapter.persister.save(resource: Book.new(title: ["Book to delete"]))
-      expect {
-        delete :destroy, params: {id: book.to_param}, session: valid_session
-      }.to change(Book, :count).by(-1)
-    end
+The last remaining action in the controller is the delete method.
 
 Running the test will produce an error with `undefined method
 'destroy'`. We can update the controller method to use the Valkyrie
@@ -404,9 +394,13 @@ At this point, all the controller actions should work and we should be
 able to open a server session and create, edit, and delete books in the
 user interface.
 
-    http://localhost:3000/books
+Start up a rails server instance
 
-Using the app, we can perform all the actions, bit you'll notice that
+    bunde exec rails s
+
+And visit [http://localhost:3000/books](http://localhost:3000/books)
+
+Using the app, we can perform all the actions, but you'll notice that
 none of the attributes are being saved to the resource. You can create a
 new book, but you can't save the title, author, or description.
 
