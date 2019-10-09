@@ -172,9 +172,11 @@ Now that we have a working change set, all that we need to do is use it in
 place of the resource in our `new` action. In the `books_controller.rb` file,
 make the following change:
 
-    def new
-      @book = BookChangeSet.new(Book.new)
-    end
+``` ruby
+def new
+  @book = BookChangeSet.new(Book.new)
+end
+```
 
 Run-run your controller spec test...
 
@@ -194,9 +196,11 @@ handy later. In order do this, we can use one of the provided Valkyrie queries
 to find all the resources of a given model. In `app/models/book.rb` add the
 following method:
 
-    def self.count
-      Valkyrie.config.metadata_adapter.query_service.find_all_of_model(model: self).count
-    end
+``` ruby
+def self.count
+  Valkyrie.config.metadata_adapter.query_service.find_all_of_model(model: self).count
+end
+```
 
 Re-running the controller tests shows that the test is now running successfully
 because we've added the missing method, but the test itself is still pending.
@@ -205,9 +209,11 @@ Let's get the test running by adding some parameters to the create request.
 The scaffold has provided a `let` statement for valid attributes. We can
 use that in order to get the tests to execute. Replace the `let` with:
 
-    let(:valid_attributes) {
-      { title: ["My Book"] }
-    }
+``` ruby
+let(:valid_attributes) {
+  { title: ["My Book"] }
+}
+```
 
 Now, when we re-run our spec tests, we should see about 12 failures.
 This is because the tests are now getting run instead of skipped.
@@ -219,9 +225,11 @@ this, but we'll just create our own method.
 Towards the top of the controller spec test, preferably after the `let`
 statements, add the following method:
 
-    def create_book(attributes)
-      Valkyrie.config.metadata_adapter.persister.save(resource: Book.new(attributes))
-    end
+``` ruby
+def create_book(attributes)
+  Valkyrie.config.metadata_adapter.persister.save(resource: Book.new(attributes))
+end
+```
 
 This method will server as our `Book.create!` process. Now we can
 replace every instance of it with a call to our method. Wherever you see
@@ -238,13 +246,15 @@ returns all the instances of our model. Similar to the `count` method
 above, we can refactor our Book model to include both the `all` and
 `count` methods. The result will look like:
 
-    def self.all
-      Valkyrie.config.metadata_adapter.query_service.find_all_of_model(model: self).to_a
-    end
+``` ruby
+def self.all
+  Valkyrie.config.metadata_adapter.query_service.find_all_of_model(model: self).to_a
+end
 
-    def self.count
-      all.count
-    end
+def self.count
+  all.count
+end
+```
 
 Note the `to_a` in our new `all` method. The query service returns
 enumerator objects, but we want these to be arrays, to we call the
@@ -255,9 +265,11 @@ so we'll need to update our controller to use one of Valkyrie's query methods
 to retrieve the given resource. All we need to do here is update the `set_book`
 method as follows:
 
-    def set_book
-      @book = Valkyrie.config.metadata_adapter.query_service.find_by(id: Valkyrie::ID.new(params[:id]))
-    end
+``` ruby
+def set_book
+  @book = Valkyrie.config.metadata_adapter.query_service.find_by(id: Valkyrie::ID.new(params[:id]))
+end
+```
 
 Re-run the specs and we will now get the error: ` undefined method 'errors'`. Looking at the controller,
 the `set_book` action is performed prior to the edit request, and is currently
@@ -265,9 +277,11 @@ returning a Book object. If remember from the previous part, a Valkyrie::Resourc
 has no `errors` method, but a change set does. We could change `set_book` to
 return a change set instead:
 
-    def set_book
-      @book = BookChangeSet.new(Valkyrie.config.metadata_adapter.query_service.find_by(id: Valkyrie::ID.new(params[:id])))
-    end
+``` ruby
+def set_book
+  @book = BookChangeSet.new(Valkyrie.config.metadata_adapter.query_service.find_by(id: Valkyrie::ID.new(params[:id])))
+end
+```
 
 Re-run your spec tests. The edit test should pass now. Are any other tests
 failing because of this change? Why or why not?
@@ -280,29 +294,33 @@ from the form and sync those changes to the change set. Then we can use our
 persister to save the new resource. The resulting method should look something
 like:
 
-    def create
-      change_set = BookChangeSet.new(Book.new)
-      change_set.validate(book_params)
-      change_set.sync
-      @book = Valkyrie.config.metadata_adapter.persister.save(resource: change_set.resource)
+``` ruby
+def create
+  change_set = BookChangeSet.new(Book.new)
+  change_set.validate(book_params)
+  change_set.sync
+  @book = Valkyrie.config.metadata_adapter.persister.save(resource: change_set.resource)
 
-      respond_to do |format|
-        if @book.persisted?
-          format.html { redirect_to @book, notice: 'Book was successfully created.' }
-          format.json { render :show, status: :created, location: @book }
-        else
-          format.html { render :new }
-          format.json { render json: @book.errors, status: :unprocessable_entity }
-        end
-      end
+  respond_to do |format|
+    if @book.persisted?
+      format.html { redirect_to @book, notice: 'Book was successfully created.' }
+      format.json { render :show, status: :created, location: @book }
+    else
+      format.html { render :new }
+      format.json { render json: @book.errors, status: :unprocessable_entity }
     end
+  end
+end
+```
 
 Re-run your specs to verify the tests pass and you'll see another new
 error about the `last` method. We can add that to our model as well:
 
-    def self.last
-      all.last
-    end
+``` ruby
+def self.last
+  all.last
+end
+```
 
 At this point there should be about 3 failures in our controller. We'll
 finish those up in the next section.
@@ -311,9 +329,11 @@ We could also do a quick refactor at this point. `Valkyrie.config.metadata_adapt
 is used twice in the controller. We can memoize this and DRY up our code a little
 bit. Create a new private method:
 
-    def metadata_adapter
-      @metadata_adapter ||= Valkyrie.config.metadata_adapter
-    end
+``` ruby
+def metadata_adapter
+  @metadata_adapter ||= Valkyrie.config.metadata_adapter
+end
+```
 
 Now we can change the other two calls to `Valkyrie.config.metadata_adapter`
 to simply `metadata_adapter`.
@@ -327,9 +347,11 @@ to the next part.
 
 Add some attributes to update the resource:
 
-    let(:new_attributes) {
-      { title: ["My Updated Book"] }
-    }
+``` ruby
+let(:new_attributes) {
+  { title: ["My Updated Book"] }
+}
+```
 
 Because our `set_book` action returns a change set, we can simply validate the
 new params on our change set directly and then update the resource.
@@ -338,25 +360,29 @@ N.B. this may not be the best way to implement this because `@book` is getting
 reset. An alternative implementation might be to keep the book and its change set
 more separate.
 
-    def update
-      respond_to do |format|
-        if @book.validate(book_params)
-          @book.sync
-          @book = metadata_adapter.persister.save(resource: @book.resource)
-          format.html { redirect_to @book, notice: 'Book was successfully updated.' }
-          format.json { render :show, status: :ok, location: @book }
-        else
-          format.html { render :edit }
-          format.json { render json: @book.errors, status: :unprocessable_entity }
-        end
-      end
+``` ruby
+def update
+  respond_to do |format|
+    if @book.validate(book_params)
+      @book.sync
+      @book = metadata_adapter.persister.save(resource: @book.resource)
+      format.html { redirect_to @book, notice: 'Book was successfully updated.' }
+      format.json { render :show, status: :ok, location: @book }
+    else
+      format.html { render :edit }
+      format.json { render json: @book.errors, status: :unprocessable_entity }
     end
+  end
+end
+```
 
 To fix the `undefined method 'reload'` error, replace the lines in the
 test with:
 
-    updated_book = Valkyrie.config.metadata_adapter.query_service.find_by(id: book.id)
-    expect(updated_book.title).to eq(["My Updated Book"])
+``` ruby
+updated_book = Valkyrie.config.metadata_adapter.query_service.find_by(id: book.id)
+expect(updated_book.title).to eq(["My Updated Book"])
+```
 
 This will reload the book from the database and verify that the title
 was updated.
@@ -364,9 +390,11 @@ was updated.
 You will also need to update the `book_params` method to account for multivalued
 fields in the request:
 
-    def book_params
-      params.require(:book).permit(title: [], author: [], description: [])
-    end
+``` ruby
+def book_params
+  params.require(:book).permit(title: [], author: [], description: [])
+end
+```
 
 #### DELETE #destroy
 
@@ -376,13 +404,15 @@ Running the test will produce an error with `undefined method
 'destroy'`. We can update the controller method to use the Valkyrie
 persister to delete the resource.
 
-    def destroy
-      metadata_adapter.persister.delete(resource: @book)
-      respond_to do |format|
-        format.html { redirect_to books_url, notice: 'Book was successfully destroyed.' }
-        format.json { head :no_content }
-      end
-    end
+``` ruby
+def destroy
+  metadata_adapter.persister.delete(resource: @book)
+  respond_to do |format|
+    format.html { redirect_to books_url, notice: 'Book was successfully destroyed.' }
+    format.json { head :no_content }
+  end
+end
+```
 
 Note that `@book` is really a change set, but the persister is only
 looking for the resource's id, so either a Valkyrie resource or a change
@@ -414,20 +444,22 @@ To fix this, we need to add `multiple: true` to each of the form fields
 that were auto-generated in `app/views/works/_form.html.erb`. To do
 that, update each input like so:
 
-    <div class="field">
-      <%= form.label :title %>
-      <%= form.text_field :title, multiple: true %>
-    </div>
+``` ruby
+<div class="field">
+  <%= form.label :title %>
+  <%= form.text_field :title, multiple: true %>
+</div>
 
-    <div class="field">
-      <%= form.label :author %>
-      <%= form.text_field :author, multiple: true %>
-    </div>
+<div class="field">
+  <%= form.label :author %>
+  <%= form.text_field :author, multiple: true %>
+</div>
 
-    <div class="field">
-      <%= form.label :description %>
-      <%= form.text_area :description, multiple: true %>
-    </div>
+<div class="field">
+  <%= form.label :description %>
+  <%= form.text_area :description, multiple: true %>
+</div>
+```
 
 Now we should be able to enter values for all our attributes and have
 them persist, as well as update and delete each book resource.
