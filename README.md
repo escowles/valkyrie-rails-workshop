@@ -441,7 +441,7 @@ If you look in the logs coming from the server output you should see:
 While we have updated our controller to allow for multiple fields, the
 params hash coming from the form is still sending singular values.
 To fix this, we need to add `multiple: true` to each of the form fields
-that were auto-generated in `app/views/works/_form.html.erb`. To do
+that were auto-generated in `app/views/books/_form.html.erb`. To do
 that, update each input like so:
 
 ``` ruby
